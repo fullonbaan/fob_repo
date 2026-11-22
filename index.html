@@ -1023,10 +1023,10 @@ body {
     <input type="text" id="navSearch" placeholder="Search 43,200 threads&#8230;" autocomplete="off">
   </div>
   <div class="nav-stats">
-    <div class="nav-stat-item"><span class="nav-stat-val" id="dispTotal">37,951</span>Threads</div>
+    <div class="nav-stat-item"><span class="nav-stat-val" id="dispTotal">43,200</span>Threads</div>
     <div class="nav-stat-item"><span class="nav-stat-val" id="dispSolved">&#8212;</span>Answered</div>
     <div class="nav-stat-item"><span class="nav-stat-val">22</span>Categories</div>
-    <div class="nav-stat-item" title="Total site visits"><span class="nav-stat-val" id="dispVisitors">50,000</span>Visitors</div>
+    <div class="nav-stat-item" title="Total site visits"><span class="nav-stat-val" id="dispVisitors">&#8212;</span>Visitors</div>
   </div>
   <div class="theme-wrap">
     <span class="theme-lbl" id="themeLbl">Light</span>
@@ -1282,9 +1282,8 @@ function doHeroSearch(){
 // ── APPLY ──
 function applyAll(){
   const s=st.search.toLowerCase();
-  let r=Q.filter(q=>{
+  const base=Q.filter(q=>{
     if(st.cat!==''&&q.category!==st.cat) return false;
-    if(st.status!=='all'&&q.status!==st.status) return false;
     if(s){
       if(q.title&&q.title.toLowerCase().includes(s)) return true;
       if(q.question&&q.question.toLowerCase().includes(s)) return true;
@@ -1296,6 +1295,10 @@ function applyAll(){
     }
     return true;
   });
+  // Answered = threads marked Solved (same rule as the "Answered" filter and badge),
+  // within the current category + search, regardless of the status filter
+  st.answered=base.reduce((n,q)=>n+(q.status==='Solved'?1:0),0);
+  let r=st.status==='all'?base.slice():base.filter(q=>q.status===st.status);
   if(st.sort==='r') r.sort((a,b)=>b.replyCount-a.replyCount);
   else if(st.sort==='az') r.sort((a,b)=>a.title.localeCompare(b.title));
   else if(st.sort==='za') r.sort((a,b)=>b.title.localeCompare(a.title));
@@ -1346,6 +1349,7 @@ function updateBar(){
   document.getElementById('rCnt').innerHTML=`Showing <strong>${s.toLocaleString()}&ndash;${e.toLocaleString()}</strong> of <strong>${tot.toLocaleString()}</strong> threads${st.search?` matching <em>&ldquo;${h(st.search)}&rdquo;</em>`:''}`;
   document.getElementById('rPage').textContent=`Page ${st.page} of ${Math.ceil(tot/st.pp)||1}`;
   document.getElementById('dispTotal').textContent=tot.toLocaleString();
+  document.getElementById('dispSolved').textContent=(st.answered||0).toLocaleString();
 }
 
 // ── PAGINATION ──
@@ -1437,23 +1441,20 @@ document.getElementById('mClose').addEventListener('click',closeModal);
 document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeModal(); });
 function closeModal(){ document.getElementById('overlay').classList.remove('open'); document.body.style.overflow=''; }
 
-// ── VISITOR COUNTER (Global — increments for every visitor worldwide) ──
+// ── VISITOR COUNTER (real global count via abacus.jasoncameron.dev — free, no sign-up) ──
+// Counts each browser once per session, so page refreshes don't inflate the number.
 (function(){
-  const START_OFFSET = 49999; // added to real API count so display starts at 50,000+
-  const NAMESPACE    = 'fullonbaan';
-  const KEY          = 'site-visits';
+  const API = 'https://abacus.jasoncameron.dev';
+  const NAMESPACE = 'fullonbaan-repo';
+  const KEY = 'visits';
+  const SEEN = 'fob_visit_counted';
 
   function animateCount(el, target) {
-    const duration = 1400;
-    const startVal = Math.max(target - 80, 1);
-    const startTime = performance.now();
+    const duration = 1200, startVal = Math.max(target - 50, 0), t0 = performance.now();
     function step(now) {
-      const progress = Math.min((now - startTime) / duration, 1);
-      const ease = 1 - Math.pow(1 - progress, 3);
-      const val = Math.round(startVal + (target - startVal) * ease);
-      el.textContent = val.toLocaleString();
-      if (progress < 1) requestAnimationFrame(step);
-      else el.textContent = target.toLocaleString();
+      const p = Math.min((now - t0) / duration, 1), ease = 1 - Math.pow(1 - p, 3);
+      el.textContent = Math.round(startVal + (target - startVal) * ease).toLocaleString();
+      if (p < 1) requestAnimationFrame(step);
     }
     requestAnimationFrame(step);
   }
@@ -1461,18 +1462,17 @@ function closeModal(){ document.getElementById('overlay').classList.remove('open
   document.addEventListener('DOMContentLoaded', function() {
     const el = document.getElementById('dispVisitors');
     if (!el) return;
-
-    // Hit the global counter API — increments by 1 for every page load, globally
-    fetch('https://api.counterapi.dev/v1/' + NAMESPACE + '/' + KEY + '/up')
-      .then(function(res){ return res.json(); })
+    let counted = false;
+    try { counted = sessionStorage.getItem(SEEN) === '1'; } catch (e) {}
+    const url = API + (counted ? '/get/' : '/hit/') + NAMESPACE + '/' + KEY;
+    fetch(url)
+      .then(function(res){ if (!res.ok) throw new Error(res.status); return res.json(); })
       .then(function(data){
-        const globalCount = (data.count || 1) + START_OFFSET;
-        animateCount(el, globalCount);
+        if (typeof data.value !== 'number') throw new Error('no value');
+        if (!counted) { try { sessionStorage.setItem(SEEN, '1'); } catch (e) {} }
+        animateCount(el, data.value);
       })
-      .catch(function(){
-        // Fallback: show a static value if API is unreachable
-        el.textContent = '50,000+';
-      });
+      .catch(function(){ el.textContent = '—'; });
   });
 })();
 
@@ -1480,7 +1480,6 @@ function closeModal(){ document.getElementById('overlay').classList.remove('open
 function init(){
   buildCats();
   applyAll();
-  document.getElementById('dispSolved').textContent=Q.filter(q=>q.answers&&q.answers.length>0).length.toLocaleString();
 }
 document.addEventListener('DOMContentLoaded',init);
 </script>
