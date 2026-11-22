@@ -1459,20 +1459,43 @@ function closeModal(){ document.getElementById('overlay').classList.remove('open
     requestAnimationFrame(step);
   }
 
-  document.addEventListener('DOMContentLoaded', function() {
+  const LAST = 'fob_visit_last';
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  // Abacus occasionally answers 500; retry a few times before giving up
+  async function call(path, tries) {
+    for (let i = 0; i < tries; i++) {
+      try {
+        const res = await fetch(API + path + NAMESPACE + '/' + KEY, { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          if (typeof data.value === 'number') return data.value;
+        }
+      } catch (e) {}
+      if (i < tries - 1) await wait(700 * (i + 1));
+    }
+    return null;
+  }
+
+  document.addEventListener('DOMContentLoaded', async function() {
     const el = document.getElementById('dispVisitors');
     if (!el) return;
-    let counted = false;
-    try { counted = sessionStorage.getItem(SEEN) === '1'; } catch (e) {}
-    const url = API + (counted ? '/get/' : '/hit/') + NAMESPACE + '/' + KEY;
-    fetch(url)
-      .then(function(res){ if (!res.ok) throw new Error(res.status); return res.json(); })
-      .then(function(data){
-        if (typeof data.value !== 'number') throw new Error('no value');
-        if (!counted) { try { sessionStorage.setItem(SEEN, '1'); } catch (e) {} }
-        animateCount(el, data.value);
-      })
-      .catch(function(){ el.textContent = '—'; });
+    let counted = false, last = null;
+    try { counted = sessionStorage.getItem(SEEN) === '1'; last = parseInt(localStorage.getItem(LAST), 10); } catch (e) {}
+    if (last > 0) el.textContent = last.toLocaleString();   // show last known value straight away
+
+    let value = null;
+    if (!counted) {
+      value = await call('/hit/', 3);
+      if (value !== null) { try { sessionStorage.setItem(SEEN, '1'); } catch (e) {} }
+    }
+    if (value === null) value = await call('/get/', 3);
+
+    if (value !== null) {
+      try { localStorage.setItem(LAST, String(value)); } catch (e) {}
+      animateCount(el, value);
+    } else if (!(last > 0)) {
+      el.textContent = '—';
+    }
   });
 })();
 
